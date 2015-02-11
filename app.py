@@ -12,6 +12,7 @@ from oauth2client.tools import argparser, run_flow
 
 PORT = 8082
 SERVER_PROC = 0
+PLAYLISTS = None
 
 # The CLIENT_SECRETS_FILE variable specifies the name of a file that contains
 # the OAuth 2.0 information for this application, including its client_id and
@@ -85,7 +86,7 @@ def authorize():
 
         flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
                 message=MISSING_CLIENT_SECRETS_MESSAGE,
-                scope=YOUTUBE_READONLY_SCOPE)
+                scope=YOUTUBE_ALTER_SCOPE)
 
         storage = Storage("%s-oauth2.json" % sys.argv[0])
         credentials = storage.get()
@@ -99,7 +100,7 @@ def authorize():
 
     return credentials
 
-def printWatchLater(yt):
+def processWatchLater(yt, f):
 
     # Retrieve the contentDetails part of the channel resource for the
     # authenticated user's channel.
@@ -129,32 +130,60 @@ def printWatchLater(yt):
         for playlist_item in playlistitems_list_response["items"]:
           title = playlist_item["snippet"]["title"]
           video_id = playlist_item["snippet"]["resourceId"]["videoId"]
-          print "%s (%s)" % (title, video_id)
+          pid = playlist_item["id"]
+          f(yt, title, video_id, pid)
 
         playlistitems_list_request = yt.playlistItems().list_next(
           playlistitems_list_request, playlistitems_list_response)
 
-      print
 
-def listPlaylists(yt):
-    pass
-#    playlist_response = yt.playlists().list(part="snippet").execute()
-#    for playlist in playlist_response["items"]
-#        pass
-#    for playlist_item in playlist_response["items"]:
-#        title = playlist_item["snippet"]["title"]
-#            video_id = playlist_item["snippet"]["resourceId"]["videoId"]
-#            print "%s (%s)" % (title, video_id)
+def fetchPlaylists(yt):
+    global PLAYLISTS
+    playlist_response = yt.playlists().list(part="snippet", mine=True, maxResults=50).execute()
+    # yes, I know I'm not handling paging here (see pageInfo property for YT API guide)
+    PLAYLISTS = { i: [ x['id'],x['snippet']['title'] ] for i,x in enumerate(playlist_response['items'], 1)}
+    return PLAYLISTS
 
-if __name__ == '__main__':
+def printPlaylists():
+    for pi in PLAYLISTS:
+        print "[%02d]: %s" % (pi, PLAYLISTS[pi][1])
 
-    # MAIN SCRIPT 
-
-    cred = authorize()
-
-    youtube = build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
+def getYt(cred):
+    return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
       http=cred.authorize(httplib2.Http()))
 
-    #listPlaylists(youtube)
-    printWatchLater(youtube)
+def AskToMove(yt, title, vid_id, pid ):
+    yn = raw_input("Move \"%s\"? [y/N]: " % title) 
+    if (yn == 'y' or yn == 'Y'):
+        printPlaylists()
+        where = raw_input("Where? [#]: ")
+        print "DEBUG: INPUT: [%s]" % where
+            
+        # add the item to the new playlist
+        print "Adding %s to playlist %s" % (title, PLAYLISTS[int(where)][1])
+        yt.playlistItems().insert(
+            part = "snippet",
+            body = {
+                'snippet' : {
+                    'playlistId' : PLAYLISTS[int(where)][0], 
+                    'resourceId' : {
+                           'kind' : 'youtube#video',
+                        'videoId' : vid_id
+                    }
+                }
+            }).execute()
+        # remove from the Watch Later playlist
+        print "Removing %s from WatchLater" % PLAYLISTS[int(where)][0]
+        yt.playlistItems().delete(
+            id = pid
+            ).execute()
+
+if __name__ == '__main__':
+    # get youtube handle
+    youtube = getYt( authorize() )
+    # fetch playlists
+    pl = listPlaylists(youtube)
+
+    #processWatchLater(youtube, lambda t, vid : sys.stdout.write( "%s (%s)\n" % (t, vid) ))
+    processWatchLater(youtube, AskToMove)
 

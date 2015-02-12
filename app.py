@@ -1,5 +1,6 @@
 import httplib2
 import os
+import os.path
 import sys
 import SocketServer
 from SimpleHTTPServer import SimpleHTTPRequestHandler
@@ -158,10 +159,19 @@ def getYt(cred):
 
 def AskToMove(yt, title, vid_id, pid, previousSelection):
     try:
-        yn = raw_input("Move \"%s\"? [y/N]: " % title) 
-        if (yn == 'y' or yn == 'Y'):
-            where = None
+        op = None
+        while not op :
+            op = raw_input("Move, Remove, Skip \"%s\"? [m|r|s (default)]: " % title) 
+            if not op:
+                op = 's'
+            if not (op == 'r' or op == 'm' or op == 's'):
+                op = None
 
+        if op == "s":
+            return previousSelection
+
+        where = None
+        if op == "m" :
             while not where or not where.isdigit():
                 where = raw_input("Where? [%s, 'p' to print list]: " % (previousSelection and PLAYLISTS[int(previousSelection)][1] or '#'))
                 if where == 'p':
@@ -182,12 +192,14 @@ def AskToMove(yt, title, vid_id, pid, previousSelection):
                         }
                     }
                 }).execute()
-            # remove from the Watch Later playlist
-            print "Removing %s from WatchLater" % PLAYLISTS[int(where)][0]
-            yt.playlistItems().delete(
-                id = pid
-                ).execute()
-            return where
+
+        # remove from the Watch Later playlist
+        print "Removing %s from WatchLater" % title
+        yt.playlistItems().delete(
+            id = pid
+            ).execute()
+        return where or previousSelection
+
     except:
         pass # most likely get some unicode errors here
 
